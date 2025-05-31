@@ -22,15 +22,6 @@ public class Case {
     @Column(name = "number")
     private String number;
 
-    @Column(name = "surname")
-    private String surname;
-
-    @Column(name = "name")
-    private String name;
-
-    @Column(name = "fathername")
-    private String fathername;
-
     @Column(name = "status")
     private boolean status;
 

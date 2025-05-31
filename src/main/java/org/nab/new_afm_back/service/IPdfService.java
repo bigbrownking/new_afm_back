@@ -9,6 +9,8 @@ import java.util.List;
 
 public interface IPdfService {
     Case uploadCaseWithPdf(UploadCaseRequest request, List<MultipartFile> additionalFiles) throws IOException;
+    void deleteAdditionalFileByName(String caseNumber, String fileName);
+    Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles) throws IOException;
     byte[] extractPdfContent(MultipartFile pdfFile) throws IOException;
     void savePdfToStorage(MultipartFile pdfFile, String fileName) throws IOException;
     boolean validatePdfFile(MultipartFile pdfFile);

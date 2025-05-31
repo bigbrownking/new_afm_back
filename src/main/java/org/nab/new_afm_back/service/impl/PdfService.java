@@ -19,19 +19,21 @@ import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class PdfService implements IPdfService {
+
     private final CaseRepository caseRepository;
     private final ArticleRepository articleRepository;
 
     @Value("${file.upload.directory:./uploads}")
     private String uploadDirectory;
 
-    private static final List<String> ALLOWED_EXTENSIONS = List.of("pdf");
+    private static final List<String> ALLOWED_EXTENSIONS = List.of("pdf", "doc", "docx", "txt");
     private static final long MAX_FILE_SIZE = 100 * 1024 * 1024;
 
     public Case uploadCaseWithPdf(UploadCaseRequest request, List<MultipartFile> additionalFiles) throws IOException {
@@ -40,7 +42,6 @@ public class PdfService implements IPdfService {
         }
 
         Article article = resolveArticle(request.getArticles());
-
         List<String> additionalFileNames = processAdditionalFiles(request, additionalFiles);
 
         Case newCase = Case.builder()
@@ -74,13 +75,12 @@ public class PdfService implements IPdfService {
             MultipartFile file = additionalFiles.get(i);
             if (!file.isEmpty()) {
                 try {
-                    String fileName = generateAdditionalFileName(request.getNumber(), file.getOriginalFilename(), i);
+                    String fileName = file.getOriginalFilename();
                     validateAndSaveFile(file, fileName);
                     fileNames.add(fileName);
                     log.info("Additional file {} saved successfully", fileName);
                 } catch (Exception e) {
                     log.error("Error saving additional file {}: {}", i, e.getMessage());
-                    // Optionally: throw exception to abort upload
                 }
             }
         }
@@ -114,13 +114,11 @@ public class PdfService implements IPdfService {
     public boolean validatePdfFile(MultipartFile pdfFile) {
         if (pdfFile == null || pdfFile.isEmpty()) return false;
 
-        // File size check
         if (pdfFile.getSize() > MAX_FILE_SIZE) {
             log.warn("File size exceeds limit: {} bytes", pdfFile.getSize());
             return false;
         }
 
-        // File extension check
         String originalFilename = pdfFile.getOriginalFilename();
         if (originalFilename == null) return false;
         String extension = originalFilename.substring(originalFilename.lastIndexOf(".") + 1).toLowerCase();
@@ -129,7 +127,6 @@ public class PdfService implements IPdfService {
             return false;
         }
 
-        // Content type check
         String contentType = pdfFile.getContentType();
         if (!"application/pdf".equals(contentType)) {
             log.warn("Invalid content type: {}", contentType);
@@ -147,10 +144,62 @@ public class PdfService implements IPdfService {
         return String.format("%s_additional_%d_%s%s", caseNumber, index, timestamp, extension);
     }
 
-    private String generateFileName(String caseNumber, String originalFilename) {
-        String timestamp = String.valueOf(System.currentTimeMillis());
-        String uuid = UUID.randomUUID().toString().substring(0, 8);
-        String extension = originalFilename.substring(originalFilename.lastIndexOf("."));
-        return String.format("%s_%s_%s%s", caseNumber, timestamp, uuid, extension);
+    public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles) throws IOException {
+        Optional<Case> optionalCase = caseRepository.getCaseByNumber(caseNumber);
+        if (optionalCase.isEmpty()) {
+            throw new IllegalArgumentException("Case not found: " + caseNumber);
+        }
+
+        Case existingCase = optionalCase.get();
+        List<String> existingFileNames = existingCase.getAdds() != null ? new ArrayList<>(existingCase.getAdds()) : new ArrayList<>();
+
+        if (additionalFiles != null && !additionalFiles.isEmpty()) {
+            log.info("Processing {} additional files for case: {}", additionalFiles.size(), caseNumber);
+            for (MultipartFile file : additionalFiles) {
+                if (!file.isEmpty()) {
+                    String fileName = file.getOriginalFilename();
+                    try {
+                        validateAndSaveFile(file, fileName);
+                        existingFileNames.add(fileName);
+                        log.info("Additional file {} saved successfully", fileName);
+                    } catch (Exception e) {
+                        log.error("Error saving additional file {}: {}", fileName, e.getMessage());
+                    }
+                }
+            }
+        }
+
+        existingCase.setAdds(existingFileNames);
+        return caseRepository.save(existingCase);
     }
+
+
+    public void deleteAdditionalFileByName(String caseNumber, String fileName) {
+        Optional<Case> optionalCase = caseRepository.getCaseByNumber(caseNumber);
+        if (optionalCase.isEmpty()) {
+            throw new IllegalArgumentException("Case not found: " + caseNumber);
+        }
+
+        Case existingCase = optionalCase.get();
+        List<String> additionalFiles = existingCase.getAdds();
+
+        if (additionalFiles == null || !additionalFiles.contains(fileName)) {
+            throw new IllegalArgumentException("File '" + fileName + "' not found in case " + caseNumber);
+        }
+
+        Path filePath = Paths.get(uploadDirectory).resolve(fileName);
+        try {
+            Files.deleteIfExists(filePath);
+            log.info("Deleted file from disk: {}", filePath);
+        } catch (IOException e) {
+            log.error("Failed to delete file: {}", filePath, e);
+            throw new RuntimeException("Failed to delete file: " + fileName, e);
+        }
+
+        additionalFiles.remove(fileName);
+        existingCase.setAdds(additionalFiles);
+        caseRepository.save(existingCase);
+        log.info("Removed file '{}' from case {}", fileName, caseNumber);
+    }
+
 }
