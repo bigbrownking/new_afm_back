@@ -88,7 +88,7 @@ public class PdfService implements IPdfService {
     }
 
     private void validateAndSaveFile(MultipartFile file, String fileName) throws IOException {
-        if (!validatePdfFile(file)) {
+        if (!validateUploadedFile(file)) {
             throw new IOException("Invalid file: " + file.getOriginalFilename());
         }
         savePdfToStorage(file, fileName);
@@ -111,28 +111,24 @@ public class PdfService implements IPdfService {
     }
 
     @Override
-    public boolean validatePdfFile(MultipartFile pdfFile) {
-        if (pdfFile == null || pdfFile.isEmpty()) return false;
+    public boolean validateUploadedFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) return false;
 
-        if (pdfFile.getSize() > MAX_FILE_SIZE) {
-            log.warn("File size exceeds limit: {} bytes", pdfFile.getSize());
+        if (file.getSize() > MAX_FILE_SIZE) {
+            log.warn("File size exceeds limit: {} bytes", file.getSize());
             return false;
         }
 
-        String originalFilename = pdfFile.getOriginalFilename();
+        String originalFilename = file.getOriginalFilename();
         if (originalFilename == null) return false;
+
         String extension = originalFilename.substring(originalFilename.lastIndexOf(".") + 1).toLowerCase();
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             log.warn("Invalid file extension: {}", extension);
             return false;
         }
 
-        String contentType = pdfFile.getContentType();
-        if (!"application/pdf".equals(contentType)) {
-            log.warn("Invalid content type: {}", contentType);
-            return false;
-        }
-
+        // You can optionally check content types here if needed, but many browsers won't send accurate types for .doc/.txt
         return true;
     }
 

@@ -8,4 +8,5 @@ public interface ICaseService {
     Case getCaseByNumber(String number);
     List<Case> getRecentCases();
     List<Case> getRecentCasesReq();
+    int getCaseCount(String number);
 }

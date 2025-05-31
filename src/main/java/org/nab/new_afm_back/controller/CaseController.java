@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.nab.new_afm_back.model.Case;
 import org.nab.new_afm_back.service.impl.CaseService;
@@ -75,4 +74,12 @@ public class CaseController {
     public ResponseEntity<List<Case>> getRecentCasesReq() {
         return ResponseEntity.ok(caseService.getRecentCasesReq());
     }
+
+    @GetMapping("/{number}/count")
+    public ResponseEntity<Integer> getCaseCount(@PathVariable String number) {
+        Case _case = caseService.getCaseByNumber(number);
+
+        return ResponseEntity.ok(_case.getAdds().size());
+    }
+
 }
