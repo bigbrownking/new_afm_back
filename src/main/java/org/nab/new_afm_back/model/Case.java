@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "cases")
@@ -32,7 +34,6 @@ public class Case {
     @Column(name = "status")
     private boolean status;
 
-    @Column(name = "info")
     private int info;
 
     @Column(name = "uploadDate")
@@ -63,4 +64,28 @@ public class Case {
     @Column(name = "object")
     private String object;
 
+    @ElementCollection
+    @CollectionTable(name = "case_additional_files", joinColumns = @JoinColumn(name = "case_id"))
+    @Column(name = "file_name")
+    private List<String> adds;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        if (uploadDate == null) {
+            uploadDate = LocalDate.now();
+        }
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
+        updateDate = LocalDate.now();
+    }
 }
