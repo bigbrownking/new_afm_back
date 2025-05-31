@@ -10,10 +10,14 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 public interface CaseRepository extends JpaRepository<Case, Long> {
     Optional<Case> getCaseByNumber(String number);
     @Query("SELECT c FROM Case c WHERE c.uploadDate >= :startDate ORDER BY c.uploadDate DESC")
     List<Case> findRecentCases(@Param("startDate") LocalDate startDate);
+
+    List<Case> findAllByNumberIn(Set<String> numbers);
+
 }

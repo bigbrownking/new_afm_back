@@ -45,7 +45,7 @@ public class CaseController {
     }
 
     @Operation(
-            summary = "Get recent cases",
+            summary = "Get recent cases by upload",
             description = "Retrieve a list of recently uploaded cases"
     )
     @ApiResponses(value = {
@@ -56,7 +56,23 @@ public class CaseController {
             )
     })
     @GetMapping("/recent")
-    public List<Case> getRecentCases() {
-        return caseService.getRecentCases();
+    public ResponseEntity<List<Case>> getRecentCases() {
+        return ResponseEntity.ok(caseService.getRecentCases());
+    }
+
+    @Operation(
+            summary = "Get recent cases by request",
+            description = "Retrieve a list of recently searched cases"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Recent cases retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = Case.class))
+            )
+    })
+    @GetMapping("/recentReq")
+    public ResponseEntity<List<Case>> getRecentCasesReq() {
+        return ResponseEntity.ok(caseService.getRecentCasesReq());
     }
 }
