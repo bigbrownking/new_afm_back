@@ -1,9 +1,9 @@
 package org.nab.new_afm_back.service;
 
-import org.nab.new_afm_back.model.Document;
-import java.util.List;
+import org.nab.new_afm_back.dto.response.Document;
 
 public interface IDocumentService {
-    List<Document> getDocumentsByCaseId(Long caseId);
-    Document saveDocument(Document document);
+    Document getDocument(String number);
+    String getTextOfPredicate(String number, String predicate);
+
 }

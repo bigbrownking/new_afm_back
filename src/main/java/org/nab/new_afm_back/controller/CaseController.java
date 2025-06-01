@@ -77,9 +77,7 @@ public class CaseController {
 
     @GetMapping("/{number}/count")
     public ResponseEntity<Integer> getCaseCount(@PathVariable String number) {
-        Case _case = caseService.getCaseByNumber(number);
-
-        return ResponseEntity.ok(_case.getAdds().size());
+        return ResponseEntity.ok(caseService.getCaseCount(number));
     }
 
 }
