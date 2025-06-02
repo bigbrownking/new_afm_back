@@ -4,8 +4,13 @@ COPY . .
 RUN mvn clean package -DskipTests
 
 FROM eclipse-temurin:21-jre
-WORKDIR /app
+WORKDIR /a
+
+RUN mkdir -p /app/pdfs
+
 COPY --from=build /app/target/*.jar app.jar
+
+COPY --from=build /app/*.pdf /app/pdfs/
 
 EXPOSE 8080
 

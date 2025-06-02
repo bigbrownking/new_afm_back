@@ -3,10 +3,10 @@ package org.nab.new_afm_back.service.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.nab.new_afm_back.dto.request.UploadCaseRequest;
-import org.nab.new_afm_back.model.Article;
 import org.nab.new_afm_back.model.Case;
-import org.nab.new_afm_back.repository.ArticleRepository;
+import org.nab.new_afm_back.model.CaseFile;
 import org.nab.new_afm_back.repository.CaseRepository;
+import org.nab.new_afm_back.repository.CaseFileRepository;
 import org.nab.new_afm_back.service.IPdfService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -14,22 +14,24 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class PdfService implements IPdfService {
 
     private final CaseRepository caseRepository;
-    private final ArticleRepository articleRepository;
+    private final CaseFileRepository caseFileRepository;
 
     @Value("${file.upload.directory:./uploads}")
     private String uploadDirectory;
@@ -46,17 +48,7 @@ public class PdfService implements IPdfService {
         }
 
         log.debug("Resolving article for case: {}", request.getNumber());
-        Article article = resolveArticle(request.getArticles());
-        if (article != null) {
-            log.info("Article resolved for case {}: ID={}, Code={}",
-                    request.getNumber(), article.getId(), article.getCode());
-        } else {
-            log.info("No article associated with case: {}", request.getNumber());
-        }
-
-        log.debug("Processing additional files for case: {}", request.getNumber());
-        List<String> additionalFileNames = processAdditionalFiles(request, additionalFiles);
-        log.info("Processed {} additional files for case: {}", additionalFileNames.size(), request.getNumber());
+        List<Integer> articles = request.getArticles();
 
         Case newCase = Case.builder()
                 .number(request.getNumber())
@@ -64,15 +56,18 @@ public class PdfService implements IPdfService {
                 .investigator(request.getInvestigator())
                 .policeman(request.getPoliceman())
                 .object(request.getObject())
-                .article(article)
+                .articles(articles)
                 .uploadDate(LocalDate.now())
-                .status(false)
-                .info(0)
-                .adds(additionalFileNames)
                 .build();
 
         log.debug("Saving new case to database: {}", request.getNumber());
         Case savedCase = caseRepository.save(newCase);
+
+        log.debug("Processing additional files for case: {}", request.getNumber());
+        List<String> additionalFileNames = processAdditionalFilesWithTracking(savedCase, additionalFiles, request.getAuthor());
+
+        savedCase.setAdds(additionalFileNames);
+        savedCase = caseRepository.save(savedCase);
 
         log.info("Case upload completed successfully: ID={}, Number={}, Files={}",
                 savedCase.getId(), savedCase.getNumber(), additionalFileNames.size());
@@ -80,23 +75,54 @@ public class PdfService implements IPdfService {
         return savedCase;
     }
 
-    private Article resolveArticle(List<Integer> articleIds) {
-        if (articleIds == null || articleIds.isEmpty()) {
-            log.debug("No article IDs provided");
-            return null;
+    private List<String> processAdditionalFilesWithTracking(Case caseEntity, List<MultipartFile> additionalFiles, String uploadedBy) throws IOException {
+        List<String> fileNames = new ArrayList<>();
+        if (additionalFiles == null || additionalFiles.isEmpty()) {
+            log.debug("No additional files to process for case: {}", caseEntity.getNumber());
+            return fileNames;
         }
 
-        Long articleId = articleIds.get(0).longValue();
-        log.debug("Looking up article with ID: {}", articleId);
+        log.info("Processing {} additional files for case: {}", additionalFiles.size(), caseEntity.getNumber());
+        LocalDateTime uploadTime = LocalDateTime.now();
 
-        Optional<Article> article = articleRepository.findById(articleId);
-        if (article.isPresent()) {
-            log.debug("Found article: ID={}, Code={}", article.get().getId(), article.get().getCode());
-        } else {
-            log.warn("Article not found with ID: {}", articleId);
+        for (int i = 0; i < additionalFiles.size(); i++) {
+            MultipartFile file = additionalFiles.get(i);
+            if (!file.isEmpty()) {
+                try {
+                    String fileName = file.getOriginalFilename();
+                    log.debug("Processing file {}/{}: name={}, size={} bytes",
+                            i + 1, additionalFiles.size(), fileName, file.getSize());
+
+                    validateAndSaveFile(file, fileName);
+                    fileNames.add(fileName);
+
+                    CaseFile caseFile = CaseFile.builder()
+                            .fileName(fileName)
+                            .originalFileName(fileName)
+                            .fileSize(file.getSize())
+                            .fileType(getFileExtension(fileName))
+                            .uploadedAt(uploadTime)
+                            .uploadedBy(uploadedBy)
+                            .caseEntity(caseEntity)
+                            .build();
+
+                    caseFileRepository.save(caseFile);
+
+                    log.info("Additional file saved successfully with timestamp: {} (case: {}, uploaded at: {})",
+                            fileName, caseEntity.getNumber(), uploadTime);
+                } catch (Exception e) {
+                    log.error("Error saving additional file {}/{} for case {}: {}",
+                            i + 1, additionalFiles.size(), caseEntity.getNumber(), e.getMessage(), e);
+                }
+            } else {
+                log.warn("Skipping empty file at index {} for case: {}", i, caseEntity.getNumber());
+            }
         }
 
-        return article.orElse(null);
+        log.info("Completed processing additional files for case {}: {}/{} files saved",
+                caseEntity.getNumber(), fileNames.size(), additionalFiles.size());
+
+        return fileNames;
     }
 
     private List<String> processAdditionalFiles(UploadCaseRequest request, List<MultipartFile> additionalFiles) throws IOException {
@@ -123,7 +149,6 @@ public class PdfService implements IPdfService {
                 } catch (Exception e) {
                     log.error("Error saving additional file {}/{} for case {}: {}",
                             i + 1, additionalFiles.size(), request.getNumber(), e.getMessage(), e);
-                    // Continue processing other files instead of failing completely
                 }
             } else {
                 log.warn("Skipping empty file at index {} for case: {}", i, request.getNumber());
@@ -206,18 +231,17 @@ public class PdfService implements IPdfService {
         return true;
     }
 
-    private String generateAdditionalFileName(String caseNumber, String originalFilename, int index) {
-        String timestamp = String.valueOf(System.currentTimeMillis());
-        String extension = originalFilename != null && originalFilename.contains(".")
-                ? originalFilename.substring(originalFilename.lastIndexOf("."))
-                : "";
-        String generatedName = String.format("%s_additional_%d_%s%s", caseNumber, index, timestamp, extension);
-
-        log.debug("Generated filename: {} -> {}", originalFilename, generatedName);
-        return generatedName;
+    private String getFileExtension(String fileName) {
+        if (fileName == null || !fileName.contains(".")) {
+            return "";
+        }
+        return fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
+    }
+    public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles) throws IOException {
+        return addAdditionalFilesToCase(caseNumber, additionalFiles, null);
     }
 
-    public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles) throws IOException {
+    public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles, String uploadedBy) throws IOException {
         log.info("Adding additional files to existing case: {}", caseNumber);
 
         Optional<Case> optionalCase = caseRepository.getCaseByNumber(caseNumber);
@@ -235,6 +259,7 @@ public class PdfService implements IPdfService {
 
         if (additionalFiles != null && !additionalFiles.isEmpty()) {
             log.info("Processing {} new additional files for case: {}", additionalFiles.size(), caseNumber);
+            LocalDateTime uploadTime = LocalDateTime.now();
 
             int successCount = 0;
             for (int i = 0; i < additionalFiles.size(); i++) {
@@ -245,8 +270,23 @@ public class PdfService implements IPdfService {
                         log.debug("Processing additional file {}/{}: {}", i + 1, additionalFiles.size(), fileName);
                         validateAndSaveFile(file, fileName);
                         existingFileNames.add(fileName);
+
+                        // Create CaseFile record with timestamp
+                        CaseFile caseFile = CaseFile.builder()
+                                .fileName(fileName)
+                                .originalFileName(fileName)
+                                .fileSize(file.getSize())
+                                .fileType(getFileExtension(fileName))
+                                .uploadedAt(uploadTime)
+                                .uploadedBy(uploadedBy)
+                                .caseEntity(existingCase)
+                                .build();
+
+                        caseFileRepository.save(caseFile);
+
                         successCount++;
-                        log.info("Additional file added successfully: {} (case: {})", fileName, caseNumber);
+                        log.info("Additional file added successfully with timestamp: {} (case: {}, uploaded at: {})",
+                                fileName, caseNumber, uploadTime);
                     } catch (Exception e) {
                         log.error("Error saving additional file {} for case {}: {}",
                                 fileName, caseNumber, e.getMessage(), e);
@@ -303,10 +343,13 @@ public class PdfService implements IPdfService {
             throw new RuntimeException("Failed to delete file: " + fileName, e);
         }
 
-        // Remove from database
+        // Remove from database (both from Case and CaseFile)
         additionalFiles.remove(fileName);
         existingCase.setAdds(additionalFiles);
         caseRepository.save(existingCase);
+
+        // Remove CaseFile record
+        caseFileRepository.deleteByFileNameAndCaseEntityNumber(fileName, caseNumber);
 
         log.info("File removed from case successfully: case={}, file={}, remaining files={}",
                 caseNumber, fileName, additionalFiles.size());
@@ -364,5 +407,37 @@ public class PdfService implements IPdfService {
         log.debug("Filename determination: caseNumber={}, numericPart={}, result={}",
                 caseNumber, numericPart, filename);
         return filename;
+    }
+
+    // New method to get files with upload timestamps
+    public List<CaseFile> getFilesWithUploadTime(String caseNumber) {
+        log.info("Retrieving files with upload timestamps for case: {}", caseNumber);
+        return caseFileRepository.findByCaseNumberOrderByUploadedAtDesc(caseNumber);
+    }
+
+    // New method to get file upload history
+    public List<CaseFile> getFileUploadHistory(String caseNumber) {
+        return caseFileRepository.findByCaseEntityNumber(caseNumber);
+    }
+
+
+    public Resource downloadCaseFile(String number, Long fileId) throws IOException {
+        Case caseEntity = caseRepository.getCaseByNumber(number)
+                .orElseThrow(() -> new IllegalArgumentException("Case not found with ID: " + number));
+
+        CaseFile caseFile = caseFileRepository.findById(fileId)
+                .orElseThrow(() -> new IllegalArgumentException("File not found with ID: " + fileId));
+
+        if (!caseFile.getCaseEntity().getId().equals(caseEntity.getId())) {
+            throw new IllegalArgumentException("File does not belong to the given case.");
+        }
+
+        Path filePath = Paths.get(uploadDirectory, caseFile.getFileName());
+
+        if (!Files.exists(filePath)) {
+            throw new FileNotFoundException("File not found on disk: " + filePath);
+        }
+
+        return new UrlResource(filePath.toUri());
     }
 }

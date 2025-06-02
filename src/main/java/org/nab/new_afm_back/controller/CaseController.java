@@ -1,25 +1,37 @@
 package org.nab.new_afm_back.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import lombok.extern.slf4j.Slf4j;
 import org.nab.new_afm_back.model.Case;
 import org.nab.new_afm_back.service.impl.CaseService;
+import org.nab.new_afm_back.service.impl.PdfService;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.List;
 
+@Slf4j
 @RestController
 @RequestMapping("/case")
 @RequiredArgsConstructor
 @Tag(name = "Case Management", description = "APIs for managing legal cases")
 public class CaseController {
     private final CaseService caseService;
+    private final PdfService pdfService;
 
     @Operation(
             summary = "Get case by number",
@@ -78,6 +90,48 @@ public class CaseController {
     @GetMapping("/{number}/count")
     public ResponseEntity<Integer> getCaseCount(@PathVariable String number) {
         return ResponseEntity.ok(caseService.getCaseCount(number));
+    }
+
+
+    @Operation(
+            summary = "Download a specific file associated with a case",
+            description = "Download a file uploaded as part of a case, using case ID and file ID"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "File downloaded successfully",
+                    content = @Content(mediaType = MediaType.APPLICATION_OCTET_STREAM_VALUE)),
+            @ApiResponse(responseCode = "404", description = "File or case not found",
+                    content = @Content(schema = @Schema(implementation = String.class))),
+            @ApiResponse(responseCode = "500", description = "Internal server error",
+                    content = @Content(schema = @Schema(implementation = String.class)))
+    })
+    @GetMapping("/case/{number}/file/{fileId}/download")
+    public ResponseEntity<?> downloadCaseFile(
+            @Parameter(description = "Case number", required = true) @PathVariable String number,
+            @Parameter(description = "File ID", required = true) @PathVariable Long fileId) {
+
+        log.info("Downloading file ID " + fileId +  "from case ID " +  number);
+
+        try {
+            Resource fileResource = pdfService.downloadCaseFile(number, fileId);
+
+            if (fileResource == null || !fileResource.exists()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("File not found.");
+            }
+
+            String contentDisposition = "attachment; filename=\"" + fileResource.getFilename() + "\"";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
+                    .body(fileResource);
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Error: " + e.getMessage());
+        } catch (IOException e) {
+            log.error("Error while reading file ID {}: {}", fileId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error reading file: " + e.getMessage());
+        }
     }
 
 }
