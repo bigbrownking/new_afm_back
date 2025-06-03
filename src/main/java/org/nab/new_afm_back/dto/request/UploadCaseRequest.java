@@ -25,7 +25,7 @@ public class UploadCaseRequest {
     private String policeman;
 
     @Schema(description = "List of article IDs associated with the case", example = "[1, 2, 3]")
-    private List<Integer> articles;
+    private List<String> articles;
 
     @Schema(description = "Object or subject of the case", example = "Theft investigation")
     private String object;

@@ -6,7 +6,7 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "case_files")
+@Table(name = "case_files1")
 @Getter
 @Setter
 @Builder
@@ -19,6 +19,9 @@ public class CaseFile {
 
     @Column(name = "file_name", nullable = false)
     private String fileName;
+
+    @Column(name = "category")
+    private String category;
 
     @Column(name = "original_file_name")
     private String originalFileName;

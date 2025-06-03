@@ -50,7 +50,7 @@ public class Case {
     @ElementCollection
     @CollectionTable(name = "case_articles1", joinColumns = @JoinColumn(name = "case_id"))
     @Column(name = "article")
-    private List<Integer> articles;
+    private List<String> articles;
 
     @Column(name = "object")
     private String object;

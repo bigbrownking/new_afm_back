@@ -11,9 +11,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.java.Log;
 import lombok.extern.slf4j.Slf4j;
 import org.nab.new_afm_back.model.Case;
+import org.nab.new_afm_back.model.CaseFile;
+import org.nab.new_afm_back.service.impl.CaseFileService;
 import org.nab.new_afm_back.service.impl.CaseService;
 import org.nab.new_afm_back.service.impl.PdfService;
 import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -32,6 +35,7 @@ import java.util.List;
 public class CaseController {
     private final CaseService caseService;
     private final PdfService pdfService;
+    private final CaseFileService caseFileService;
 
     @Operation(
             summary = "Get case by number",
@@ -67,8 +71,10 @@ public class CaseController {
             )
     })
     @GetMapping("/recent")
-    public ResponseEntity<List<Case>> getRecentCases() {
-        return ResponseEntity.ok(caseService.getRecentCases());
+    public ResponseEntity<Page<Case>> getRecentCases(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(caseService.getRecentCases(page, size));
     }
 
     @Operation(
@@ -83,10 +89,11 @@ public class CaseController {
             )
     })
     @GetMapping("/recentReq")
-    public ResponseEntity<List<Case>> getRecentCasesReq() {
-        return ResponseEntity.ok(caseService.getRecentCasesReq());
+    public ResponseEntity<Page<Case>> getRecentCasesReq(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(caseService.getRecentCasesReq(page, size));
     }
-
     @GetMapping("/{number}/count")
     public ResponseEntity<Integer> getCaseCount(@PathVariable String number) {
         return ResponseEntity.ok(caseService.getCaseCount(number));
@@ -105,7 +112,7 @@ public class CaseController {
             @ApiResponse(responseCode = "500", description = "Internal server error",
                     content = @Content(schema = @Schema(implementation = String.class)))
     })
-    @GetMapping("/case/{number}/file/{fileId}/download")
+    @GetMapping("/{number}/file/{fileId}/download")
     public ResponseEntity<?> downloadCaseFile(
             @Parameter(description = "Case number", required = true) @PathVariable String number,
             @Parameter(description = "File ID", required = true) @PathVariable Long fileId) {
@@ -134,4 +141,11 @@ public class CaseController {
         }
     }
 
+
+    @GetMapping("/{number}/caseFiles")
+    private ResponseEntity<Page<CaseFile>> getCaseFiles(@PathVariable String number,
+                                                        @RequestParam(defaultValue = "0") int page,
+                                                        @RequestParam(defaultValue = "10") int size){
+        return ResponseEntity.ok(caseFileService.getAllCaseFilesOfCase(number, page, size));
+    }
 }

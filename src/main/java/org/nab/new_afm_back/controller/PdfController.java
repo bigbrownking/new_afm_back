@@ -147,29 +147,29 @@ public class PdfController {
             @ApiResponse(responseCode = "500", description = "Internal server error during file deletion",
                     content = @Content(schema = @Schema(implementation = String.class)))
     })
-    @DeleteMapping("/{caseNumber}/file/{fileName}")
+    @DeleteMapping("/{caseNumber}/file/{fileId}")
     public ResponseEntity<?> deleteAdditionalFileByName(
             @Parameter(description = "Case number from which the file will be deleted", required = true)
             @PathVariable("caseNumber") String caseNumber,
             @Parameter(description = "Exact name of the file to delete", required = true)
-            @PathVariable("fileName") String fileName) {
+            @PathVariable("fileId") int id) {
 
-        log.info("Deleting file '{}' from case: {}", fileName, caseNumber);
+        log.info("Deleting file '{}' from case: {}", id, caseNumber);
 
         try {
-            pdfService.deleteAdditionalFileByName(caseNumber, fileName);
+            pdfService.deleteAdditionalFileById(caseNumber, id);
 
-            log.info("Successfully deleted file '{}' from case: {}", fileName, caseNumber);
+            log.info("Successfully deleted file '{}' from case: {}", id, caseNumber);
 
-            return ResponseEntity.ok("File '" + fileName + "' deleted successfully from case " + caseNumber);
+            return ResponseEntity.ok("File '" + id + "' deleted successfully from case " + caseNumber);
 
         } catch (IllegalArgumentException e) {
             log.warn("File deletion failed - not found: case={}, file={}, error={}",
-                    caseNumber, fileName, e.getMessage());
+                    caseNumber, id, e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Error: " + e.getMessage());
         } catch (Exception e) {
             log.error("Unexpected error during file deletion: case={}, file={}",
-                    caseNumber, fileName, e);
+                    caseNumber, id, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Unexpected error: " + e.getMessage());
         }
@@ -234,16 +234,16 @@ public class PdfController {
 
     private String determineFilename(String caseNumber) {
         String numericPart = caseNumber.replaceAll("[^0-9]", "");
-        String filename;
+        String filename = null;
 
         if (!numericPart.isEmpty()) {
             int caseNum = Integer.parseInt(numericPart);
             if (caseNum == 1) {
                 filename = "documentation.pdf";
             } else if (caseNum == 2) {
-                filename = "documentation1.pdf";
-            } else {
-                filename = "case_" + caseNumber + "_document.pdf";
+                filename = "documentation.pdf";
+            } else if(caseNum == 3){
+                filename = "documentation.pdf";
             }
         } else {
             filename = "case_" + caseNumber + "_document.pdf";

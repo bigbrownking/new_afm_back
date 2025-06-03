@@ -2,6 +2,7 @@ package org.nab.new_afm_back.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.nab.new_afm_back.dto.request.UploadAdds;
 import org.nab.new_afm_back.dto.request.UploadCaseRequest;
 import org.nab.new_afm_back.model.Case;
 import org.nab.new_afm_back.model.CaseFile;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.FileNotFoundException;
@@ -48,7 +50,7 @@ public class PdfService implements IPdfService {
         }
 
         log.debug("Resolving article for case: {}", request.getNumber());
-        List<Integer> articles = request.getArticles();
+
 
         Case newCase = Case.builder()
                 .number(request.getNumber())
@@ -56,7 +58,7 @@ public class PdfService implements IPdfService {
                 .investigator(request.getInvestigator())
                 .policeman(request.getPoliceman())
                 .object(request.getObject())
-                .articles(articles)
+                .articles(request.getArticles())
                 .uploadDate(LocalDate.now())
                 .build();
 
@@ -125,42 +127,6 @@ public class PdfService implements IPdfService {
         return fileNames;
     }
 
-    private List<String> processAdditionalFiles(UploadCaseRequest request, List<MultipartFile> additionalFiles) throws IOException {
-        List<String> fileNames = new ArrayList<>();
-        if (additionalFiles == null || additionalFiles.isEmpty()) {
-            log.debug("No additional files to process for case: {}", request.getNumber());
-            return fileNames;
-        }
-
-        log.info("Processing {} additional files for case: {}", additionalFiles.size(), request.getNumber());
-
-        for (int i = 0; i < additionalFiles.size(); i++) {
-            MultipartFile file = additionalFiles.get(i);
-            if (!file.isEmpty()) {
-                try {
-                    String fileName = file.getOriginalFilename();
-                    log.debug("Processing file {}/{}: name={}, size={} bytes",
-                            i + 1, additionalFiles.size(), fileName, file.getSize());
-
-                    validateAndSaveFile(file, fileName);
-                    fileNames.add(fileName);
-
-                    log.info("Additional file saved successfully: {} (case: {})", fileName, request.getNumber());
-                } catch (Exception e) {
-                    log.error("Error saving additional file {}/{} for case {}: {}",
-                            i + 1, additionalFiles.size(), request.getNumber(), e.getMessage(), e);
-                }
-            } else {
-                log.warn("Skipping empty file at index {} for case: {}", i, request.getNumber());
-            }
-        }
-
-        log.info("Completed processing additional files for case {}: {}/{} files saved",
-                request.getNumber(), fileNames.size(), additionalFiles.size());
-
-        return fileNames;
-    }
-
     private void validateAndSaveFile(MultipartFile file, String fileName) throws IOException {
         log.debug("Validating file: {}", fileName);
 
@@ -172,14 +138,7 @@ public class PdfService implements IPdfService {
         log.debug("File validation passed, saving: {}", fileName);
         savePdfToStorage(file, fileName);
         log.debug("File saved successfully: {}", fileName);
-    }
 
-    @Override
-    public byte[] extractPdfContent(MultipartFile pdfFile) throws IOException {
-        log.debug("Extracting content from PDF file: {}", pdfFile.getOriginalFilename());
-        byte[] content = pdfFile.getBytes();
-        log.info("Extracted {} bytes from PDF: {}", content.length, pdfFile.getOriginalFilename());
-        return content;
     }
 
     @Override
@@ -308,27 +267,29 @@ public class PdfService implements IPdfService {
 
         return updatedCase;
     }
-
-    public void deleteAdditionalFileByName(String caseNumber, String fileName) {
-        log.info("Deleting additional file: {} from case: {}", fileName, caseNumber);
+    @Transactional
+    public void deleteAdditionalFileById(String caseNumber, int id) {
+        log.info("Deleting additional file: {} from case: {}", id, caseNumber);
 
         Optional<Case> optionalCase = caseRepository.getCaseByNumber(caseNumber);
         if (optionalCase.isEmpty()) {
-            log.warn("Case not found when trying to delete file: case={}, file={}", caseNumber, fileName);
+            log.warn("Case not found when trying to delete file: case={}, file={}", caseNumber, id);
             throw new IllegalArgumentException("Case not found: " + caseNumber);
         }
 
         Case existingCase = optionalCase.get();
-        List<String> additionalFiles = existingCase.getAdds();
+        List<CaseFile> additionalFiles = existingCase.getCaseFiles();
 
-        if (additionalFiles == null || !additionalFiles.contains(fileName)) {
+        if (additionalFiles == null || !doesContainId(additionalFiles, id)) {
             log.warn("File not found in case: case={}, file={}, available files={}",
-                    caseNumber, fileName, additionalFiles);
-            throw new IllegalArgumentException("File '" + fileName + "' not found in case " + caseNumber);
+                    caseNumber, id, additionalFiles);
+            throw new IllegalArgumentException("File '" + id + "' not found in case " + caseNumber);
         }
 
         // Delete physical file
-        Path filePath = Paths.get(uploadDirectory).resolve(fileName);
+        CaseFile caseFile = caseFileRepository.getReferenceById((long) id);
+        String filename = caseFile.getFileName();
+        Path filePath = Paths.get(uploadDirectory).resolve(filename);
         log.debug("Attempting to delete physical file: {}", filePath);
 
         try {
@@ -340,21 +301,28 @@ public class PdfService implements IPdfService {
             }
         } catch (IOException e) {
             log.error("Failed to delete physical file: {}", filePath, e);
-            throw new RuntimeException("Failed to delete file: " + fileName, e);
+            throw new RuntimeException("Failed to delete file: " + id, e);
         }
 
         // Remove from database (both from Case and CaseFile)
-        additionalFiles.remove(fileName);
-        existingCase.setAdds(additionalFiles);
+        additionalFiles.remove(caseFile);
         caseRepository.save(existingCase);
 
         // Remove CaseFile record
-        caseFileRepository.deleteByFileNameAndCaseEntityNumber(fileName, caseNumber);
+        caseFileRepository.deleteByIdAndCaseEntityNumber((long) id, caseNumber);
 
         log.info("File removed from case successfully: case={}, file={}, remaining files={}",
-                caseNumber, fileName, additionalFiles.size());
+                caseNumber, id, additionalFiles.size());
     }
 
+    private boolean doesContainId(List<CaseFile> caseFiles, int id){
+        for(CaseFile caseFile : caseFiles){
+            if(caseFile.getId() == id){
+                return true;
+            }
+        }
+        return false;
+    }
     public Resource downloadPdfByCaseNumber(String caseNumber) throws IOException {
         log.info("Processing PDF download request for case: {}", caseNumber);
 
@@ -389,16 +357,16 @@ public class PdfService implements IPdfService {
 
     private String determineFilename(String caseNumber) {
         String numericPart = caseNumber.replaceAll("[^0-9]", "");
-        String filename;
+        String filename = null;
 
         if (!numericPart.isEmpty()) {
             int caseNum = Integer.parseInt(numericPart);
             if (caseNum == 1) {
                 filename = "documentation.pdf";
             } else if (caseNum == 2) {
-                filename = "documentation1.pdf";
-            } else {
-                filename = "case_" + caseNumber + "_document.pdf";
+                filename = "documentation.pdf";
+            } else if(caseNum == 3){
+                filename = "documentation.pdf";
             }
         } else {
             filename = "case_" + caseNumber + "_document.pdf";

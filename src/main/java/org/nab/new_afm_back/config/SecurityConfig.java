@@ -17,12 +17,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .cors() // Enable CORS with custom configuration
+                .cors()
                 .and()
-                .csrf().disable() // Disable CSRF for APIs (enable if needed)
+                .csrf().disable()
                 .authorizeHttpRequests(authz -> authz
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // Allow preflight
-                        .anyRequest().permitAll() // Adjust for auth rules
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .anyRequest().permitAll()
                 );
 
         return http.build();
@@ -30,16 +30,20 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
+        CorsConfiguration configuration = new CorsConfiguration();
 
-        config.setAllowedOrigins(List.of("*")); // Change to specific origins in production
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
-        config.setAllowCredentials(true); // If you use cookies or HTTP Basic Auth
-        config.setMaxAge(3600L); // Cache pre-flight response for 1 hour
+        configuration.addAllowedOriginPattern("*");
+
+        configuration.addAllowedMethod("*");
+
+        configuration.addAllowedHeader("*");
+
+        configuration.setAllowCredentials(false);
+
+        configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
+        source.registerCorsConfiguration("/**", configuration);
 
         return source;
     }
