@@ -9,13 +9,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.nab.new_afm_back.dto.request.UploadCaseRequest;
 import org.nab.new_afm_back.model.Case;
-import org.nab.new_afm_back.service.impl.PdfService;
+import org.nab.new_afm_back.service.impl.FileService;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -31,9 +29,9 @@ import java.util.List;
 @RequiredArgsConstructor
 @Tag(name = "PDF Management", description = "APIs for uploading and managing PDF documents")
 @Slf4j
-public class PdfController {
+public class FileController {
 
-    private final PdfService pdfService;
+    private final FileService fileService;
 
     @Operation(
             summary = "Upload case with PDF and additional files",
@@ -47,8 +45,8 @@ public class PdfController {
             @ApiResponse(responseCode = "500", description = "Internal server error during file processing",
                     content = @Content(schema = @Schema(implementation = String.class)))
     })
-    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<?> uploadCaseWithPdf(
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> uploadCaseWithFiles(
             @RequestPart("caseData") String caseDataJson,
             @RequestPart(value = "additionalFiles", required = false) List<MultipartFile> additionalFiles) {
 
@@ -61,7 +59,7 @@ public class PdfController {
             log.info("Parsed upload request for case number: {}, author: {}",
                     request.getNumber(), request.getAuthor());
 
-            Case uploadedCase = pdfService.uploadCaseWithPdf(request, additionalFiles);
+            Case uploadedCase = fileService.uploadCaseWithFiles(request, additionalFiles);
 
             log.info("Case uploaded successfully with ID: {}, number: {}",
                     uploadedCase.getId(), uploadedCase.getNumber());
@@ -114,10 +112,10 @@ public class PdfController {
         }
 
         try {
-            Case updatedCase = pdfService.addAdditionalFilesToCase(caseNumber, additionalFiles);
+            Case updatedCase = fileService.addAdditionalFilesToCase(caseNumber, additionalFiles);
 
             log.info("Successfully added files to case: {}. Total additional files now: {}",
-                    caseNumber, updatedCase.getAdds() != null ? updatedCase.getAdds().size() : 0);
+                    caseNumber, updatedCase.getCaseFiles() != null ? updatedCase.getCaseFiles().size() : 0);
 
             return ResponseEntity.ok(updatedCase);
 
@@ -151,13 +149,13 @@ public class PdfController {
     public ResponseEntity<?> deleteAdditionalFileByName(
             @Parameter(description = "Case number from which the file will be deleted", required = true)
             @PathVariable("caseNumber") String caseNumber,
-            @Parameter(description = "Exact name of the file to delete", required = true)
+            @Parameter(description = "Exact id of the file to delete", required = true)
             @PathVariable("fileId") int id) {
 
         log.info("Deleting file '{}' from case: {}", id, caseNumber);
 
         try {
-            pdfService.deleteAdditionalFileById(caseNumber, id);
+            fileService.deleteAdditionalFileById(caseNumber, id);
 
             log.info("Successfully deleted file '{}' from case: {}", id, caseNumber);
 
@@ -176,83 +174,103 @@ public class PdfController {
     }
 
     @Operation(
-            summary = "Download PDF file by case number",
-            description = "Download the main PDF document associated with a specific case number"
+            summary = "Download document file by case number in specified format",
+            description = "Download the document associated with a specific case number in PDF or Word format"
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "PDF file downloaded successfully",
-                    content = @Content(mediaType = "application/pdf")),
-            @ApiResponse(responseCode = "404", description = "Case not found or PDF file not available",
+            @ApiResponse(responseCode = "200", description = "Document file downloaded successfully",
+                    content = {
+                            @Content(mediaType = "application/pdf"),
+                            @Content(mediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    }),
+            @ApiResponse(responseCode = "400", description = "Invalid format specified",
+                    content = @Content(schema = @Schema(implementation = String.class))),
+            @ApiResponse(responseCode = "404", description = "Case not found or document file not available",
                     content = @Content(schema = @Schema(implementation = String.class))),
             @ApiResponse(responseCode = "500", description = "Internal server error during file retrieval",
                     content = @Content(schema = @Schema(implementation = String.class)))
     })
     @GetMapping("/{caseNumber}/download")
-    public ResponseEntity<?> downloadPdfByCaseNumber(
-            @Parameter(description = "Case number to download PDF for", required = true)
-            @PathVariable("caseNumber") String caseNumber) {
+    public ResponseEntity<?> downloadDocumentByCaseNumber(
+            @Parameter(description = "Case number to download document for", required = true)
+            @PathVariable("caseNumber") String caseNumber,
 
-        log.info("PDF download requested for case: {}", caseNumber);
+            @Parameter(description = "Document format (pdf or word)", required = false,
+                    schema = @Schema(allowableValues = {"pdf", "word"}, defaultValue = "pdf"))
+            @RequestParam(value = "format", defaultValue = "pdf") String format) {
+
+        log.info("Document download requested for case: {}, format: {}", caseNumber, format);
+
+        if (!isValidFormat(format)) {
+            log.warn("Invalid format requested: {}", format);
+            return ResponseEntity.badRequest()
+                    .body("Invalid format. Supported formats: pdf, word");
+        }
 
         try {
-            Resource pdfResource = pdfService.downloadPdfByCaseNumber(caseNumber);
+            Resource documentResource;
+            String mediaType;
+            String fileExtension;
 
-            if (pdfResource == null || !pdfResource.exists()) {
-                log.warn("PDF file not found for case: {}", caseNumber);
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body("PDF file not found for case: " + caseNumber);
+            switch (format.toLowerCase()) {
+                case "pdf":
+                    documentResource = fileService.downloadPdfByCaseNumber(caseNumber);
+                    mediaType = MediaType.APPLICATION_PDF_VALUE;
+                    fileExtension = ".pdf";
+                    break;
+                case "word":
+                    documentResource = fileService.downloadWordByCaseNumber(caseNumber);
+                    mediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                    fileExtension = ".docx";
+                    break;
+                default:
+                    return ResponseEntity.badRequest()
+                            .body("Unsupported format: " + format);
             }
 
-            String filename = determineFilename(caseNumber);
-            long fileSize = pdfResource.contentLength();
+            if (documentResource == null || !documentResource.exists()) {
+                log.warn("Document file not found for case: {} in format: {}", caseNumber, format);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body("Document file not found for case: " + caseNumber + " in " + format + " format");
+            }
 
-            log.info("Serving PDF download: case={}, filename={}, size={} bytes",
-                    caseNumber, filename, fileSize);
+            String filename = determineFilename(caseNumber, fileExtension);
+            long fileSize = documentResource.contentLength();
+
+            log.info("Serving document download: case={}, format={}, filename={}, size={} bytes",
+                    caseNumber, format, filename, fileSize);
 
             HttpHeaders headers = new HttpHeaders();
             headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"");
-            headers.add(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_PDF_VALUE);
+            headers.add(HttpHeaders.CONTENT_TYPE, mediaType);
 
             return ResponseEntity.ok()
                     .headers(headers)
                     .contentLength(fileSize)
-                    .body(pdfResource);
+                    .body(documentResource);
 
         } catch (IllegalArgumentException e) {
-            log.warn("Download failed - case not found: case={}, error={}", caseNumber, e.getMessage());
+            log.warn("Download failed - case not found: case={}, format={}, error={}",
+                    caseNumber, format, e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Error: " + e.getMessage());
         } catch (IOException e) {
-            log.error("IO error reading PDF file for case: {}", caseNumber, e);
+            log.error("IO error reading document file for case: {}, format: {}", caseNumber, format, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error reading PDF file: " + e.getMessage());
+                    .body("Error reading document file: " + e.getMessage());
         } catch (Exception e) {
-            log.error("Unexpected error during PDF download for case: {}", caseNumber, e);
+            log.error("Unexpected error during document download for case: {}, format: {}",
+                    caseNumber, format, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Unexpected error: " + e.getMessage());
         }
     }
 
-    private String determineFilename(String caseNumber) {
-        String numericPart = caseNumber.replaceAll("[^0-9]", "");
-        String filename = null;
-
-        if (!numericPart.isEmpty()) {
-            int caseNum = Integer.parseInt(numericPart);
-            if (caseNum == 1) {
-                filename = "documentation.pdf";
-            } else if (caseNum == 2) {
-                filename = "documentation.pdf";
-            } else if(caseNum == 3){
-                filename = "documentation.pdf";
-            }
-        } else {
-            filename = "case_" + caseNumber + "_document.pdf";
-        }
-
-        log.debug("Determined filename for case {}: {}", caseNumber, filename);
-        return filename;
+    private boolean isValidFormat(String format) {
+        return format != null && (format.equalsIgnoreCase("pdf") || format.equalsIgnoreCase("word"));
     }
 
+    private String determineFilename(String caseNumber, String extension) {
 
-
+        return "documentation" + extension;
+    }
 }

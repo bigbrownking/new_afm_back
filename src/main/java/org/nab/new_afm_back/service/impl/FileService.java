@@ -2,13 +2,12 @@ package org.nab.new_afm_back.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.nab.new_afm_back.dto.request.UploadAdds;
 import org.nab.new_afm_back.dto.request.UploadCaseRequest;
 import org.nab.new_afm_back.model.Case;
 import org.nab.new_afm_back.model.CaseFile;
 import org.nab.new_afm_back.repository.CaseRepository;
 import org.nab.new_afm_back.repository.CaseFileRepository;
-import org.nab.new_afm_back.service.IPdfService;
+import org.nab.new_afm_back.service.IFIleService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -23,6 +22,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -30,7 +30,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class PdfService implements IPdfService {
+public class FileService implements IFIleService {
 
     private final CaseRepository caseRepository;
     private final CaseFileRepository caseFileRepository;
@@ -38,10 +38,10 @@ public class PdfService implements IPdfService {
     @Value("${file.upload.directory:./uploads}")
     private String uploadDirectory;
 
-    private static final List<String> ALLOWED_EXTENSIONS = List.of("pdf", "doc", "docx", "txt");
+    private static final List<String> ALLOWED_EXTENSIONS = List.of("pdf", "doc", "docx", "txt", "xlsx");
     private static final long MAX_FILE_SIZE = 100 * 1024 * 1024;
 
-    public Case uploadCaseWithPdf(UploadCaseRequest request, List<MultipartFile> additionalFiles) throws IOException {
+    public Case uploadCaseWithFiles(UploadCaseRequest request, List<MultipartFile> additionalFiles) throws IOException {
         log.info("Starting case upload process for case number: {}", request.getNumber());
 
         if (caseRepository.getCaseByNumber(request.getNumber()).isPresent()) {
@@ -50,7 +50,6 @@ public class PdfService implements IPdfService {
         }
 
         log.debug("Resolving article for case: {}", request.getNumber());
-
 
         Case newCase = Case.builder()
                 .number(request.getNumber())
@@ -68,7 +67,6 @@ public class PdfService implements IPdfService {
         log.debug("Processing additional files for case: {}", request.getNumber());
         List<String> additionalFileNames = processAdditionalFilesWithTracking(savedCase, additionalFiles, request.getAuthor());
 
-        savedCase.setAdds(additionalFileNames);
         savedCase = caseRepository.save(savedCase);
 
         log.info("Case upload completed successfully: ID={}, Number={}, Files={}",
@@ -91,18 +89,21 @@ public class PdfService implements IPdfService {
             MultipartFile file = additionalFiles.get(i);
             if (!file.isEmpty()) {
                 try {
-                    String fileName = file.getOriginalFilename();
+                    String originalFileName = file.getOriginalFilename();
                     log.debug("Processing file {}/{}: name={}, size={} bytes",
-                            i + 1, additionalFiles.size(), fileName, file.getSize());
+                            i + 1, additionalFiles.size(), originalFileName, file.getSize());
 
-                    validateAndSaveFile(file, fileName);
-                    fileNames.add(fileName);
+                    // Generate unique filename if duplicate exists
+                    String uniqueFileName = generateUniqueFileName(originalFileName);
+
+                    validateAndSaveFile(file, uniqueFileName);
+                    fileNames.add(uniqueFileName);
 
                     CaseFile caseFile = CaseFile.builder()
-                            .fileName(fileName)
-                            .originalFileName(fileName)
+                            .fileName(uniqueFileName)
+                            .originalFileName(originalFileName)
                             .fileSize(file.getSize())
-                            .fileType(getFileExtension(fileName))
+                            .fileType(getFileExtension(originalFileName))
                             .uploadedAt(uploadTime)
                             .uploadedBy(uploadedBy)
                             .caseEntity(caseEntity)
@@ -110,8 +111,8 @@ public class PdfService implements IPdfService {
 
                     caseFileRepository.save(caseFile);
 
-                    log.info("Additional file saved successfully with timestamp: {} (case: {}, uploaded at: {})",
-                            fileName, caseEntity.getNumber(), uploadTime);
+                    log.info("Additional file saved successfully with timestamp: {} -> {} (case: {}, uploaded at: {})",
+                            originalFileName, uniqueFileName, caseEntity.getNumber(), uploadTime);
                 } catch (Exception e) {
                     log.error("Error saving additional file {}/{} for case {}: {}",
                             i + 1, additionalFiles.size(), caseEntity.getNumber(), e.getMessage(), e);
@@ -127,6 +128,66 @@ public class PdfService implements IPdfService {
         return fileNames;
     }
 
+    /**
+     * Generates a unique filename by checking for duplicates in both database and file system
+     */
+    private String generateUniqueFileName(String originalFileName) {
+        if (originalFileName == null) {
+            return "unnamed_file_" + System.currentTimeMillis();
+        }
+
+        String baseFileName = getFileNameWithoutExtension(originalFileName);
+        String extension = getFileExtension(originalFileName);
+        String currentFileName = originalFileName;
+        int counter = 1;
+
+        while (isFileNameExists(currentFileName) || isPhysicalFileExists(currentFileName)) {
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            String s = extension.isEmpty() ? "" : "." + extension;
+            currentFileName = baseFileName + "_" + timestamp + "_" + counter +
+                    s;
+            counter++;
+
+            // Safety check to prevent infinite loop
+            if (counter > 1000) {
+                currentFileName = baseFileName + "_" + System.currentTimeMillis() +
+                        (extension.isEmpty() ? "" : "." + extension);
+                break;
+            }
+        }
+
+        if (!currentFileName.equals(originalFileName)) {
+            log.info("Generated unique filename: {} -> {}", originalFileName, currentFileName);
+        }
+
+        return currentFileName;
+    }
+
+    /**
+     * Check if filename already exists in database for the given case
+     */
+    private boolean isFileNameExists(String fileName) {
+        return caseFileRepository.existsByFileName(fileName);
+    }
+
+    /**
+     * Check if physical file already exists in upload directory
+     */
+    private boolean isPhysicalFileExists(String fileName) {
+        Path filePath = Paths.get(uploadDirectory).resolve(fileName);
+        return Files.exists(filePath);
+    }
+
+    /**
+     * Extract filename without extension
+     */
+    private String getFileNameWithoutExtension(String fileName) {
+        if (fileName == null || !fileName.contains(".")) {
+            return fileName;
+        }
+        return fileName.substring(0, fileName.lastIndexOf("."));
+    }
+
     private void validateAndSaveFile(MultipartFile file, String fileName) throws IOException {
         log.debug("Validating file: {}", fileName);
 
@@ -136,13 +197,12 @@ public class PdfService implements IPdfService {
         }
 
         log.debug("File validation passed, saving: {}", fileName);
-        savePdfToStorage(file, fileName);
+        saveFileToStorage(file, fileName);
         log.debug("File saved successfully: {}", fileName);
-
     }
 
     @Override
-    public void savePdfToStorage(MultipartFile pdfFile, String fileName) throws IOException {
+    public void saveFileToStorage(MultipartFile pdfFile, String fileName) throws IOException {
         log.debug("Saving file to storage: {} (size: {} bytes)", fileName, pdfFile.getSize());
 
         Path uploadPath = Paths.get(uploadDirectory);
@@ -196,11 +256,12 @@ public class PdfService implements IPdfService {
         }
         return fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
     }
+
     public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles) throws IOException {
         return addAdditionalFilesToCase(caseNumber, additionalFiles, null);
     }
 
-    public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles, String uploadedBy) throws IOException {
+    public Case addAdditionalFilesToCase(String caseNumber, List<MultipartFile> additionalFiles, String uploadedBy) {
         log.info("Adding additional files to existing case: {}", caseNumber);
 
         Optional<Case> optionalCase = caseRepository.getCaseByNumber(caseNumber);
@@ -210,11 +271,6 @@ public class PdfService implements IPdfService {
         }
 
         Case existingCase = optionalCase.get();
-        List<String> existingFileNames = existingCase.getAdds() != null ?
-                new ArrayList<>(existingCase.getAdds()) : new ArrayList<>();
-
-        log.info("Case found: {} (current additional files: {})",
-                caseNumber, existingFileNames.size());
 
         if (additionalFiles != null && !additionalFiles.isEmpty()) {
             log.info("Processing {} new additional files for case: {}", additionalFiles.size(), caseNumber);
@@ -224,18 +280,21 @@ public class PdfService implements IPdfService {
             for (int i = 0; i < additionalFiles.size(); i++) {
                 MultipartFile file = additionalFiles.get(i);
                 if (!file.isEmpty()) {
-                    String fileName = file.getOriginalFilename();
+                    String originalFileName = file.getOriginalFilename();
                     try {
-                        log.debug("Processing additional file {}/{}: {}", i + 1, additionalFiles.size(), fileName);
-                        validateAndSaveFile(file, fileName);
-                        existingFileNames.add(fileName);
+                        log.debug("Processing additional file {}/{}: {}", i + 1, additionalFiles.size(), originalFileName);
+
+                        // Generate unique filename if duplicate exists
+                        String uniqueFileName = generateUniqueFileName(originalFileName);
+
+                        validateAndSaveFile(file, uniqueFileName);
 
                         // Create CaseFile record with timestamp
                         CaseFile caseFile = CaseFile.builder()
-                                .fileName(fileName)
-                                .originalFileName(fileName)
+                                .fileName(uniqueFileName)
+                                .originalFileName(originalFileName)
                                 .fileSize(file.getSize())
-                                .fileType(getFileExtension(fileName))
+                                .fileType(getFileExtension(originalFileName))
                                 .uploadedAt(uploadTime)
                                 .uploadedBy(uploadedBy)
                                 .caseEntity(existingCase)
@@ -244,11 +303,11 @@ public class PdfService implements IPdfService {
                         caseFileRepository.save(caseFile);
 
                         successCount++;
-                        log.info("Additional file added successfully with timestamp: {} (case: {}, uploaded at: {})",
-                                fileName, caseNumber, uploadTime);
+                        log.info("Additional file added successfully with unique name: {} -> {} (case: {}, uploaded at: {})",
+                                originalFileName, uniqueFileName, caseNumber, uploadTime);
                     } catch (Exception e) {
                         log.error("Error saving additional file {} for case {}: {}",
-                                fileName, caseNumber, e.getMessage(), e);
+                                originalFileName, caseNumber, e.getMessage(), e);
                     }
                 } else {
                     log.warn("Skipping empty file at index {} for case: {}", i, caseNumber);
@@ -259,14 +318,14 @@ public class PdfService implements IPdfService {
                     successCount, additionalFiles.size(), caseNumber);
         }
 
-        existingCase.setAdds(existingFileNames);
         Case updatedCase = caseRepository.save(existingCase);
 
         log.info("Case updated successfully: {} (total additional files: {})",
-                caseNumber, existingFileNames.size());
+                caseNumber, updatedCase.getCaseFiles().size());
 
         return updatedCase;
     }
+
     @Transactional
     public void deleteAdditionalFileById(String caseNumber, int id) {
         log.info("Deleting additional file: {} from case: {}", id, caseNumber);
@@ -315,14 +374,15 @@ public class PdfService implements IPdfService {
                 caseNumber, id, additionalFiles.size());
     }
 
-    private boolean doesContainId(List<CaseFile> caseFiles, int id){
-        for(CaseFile caseFile : caseFiles){
-            if(caseFile.getId() == id){
+    private boolean doesContainId(List<CaseFile> caseFiles, int id) {
+        for (CaseFile caseFile : caseFiles) {
+            if (caseFile.getId() == id) {
                 return true;
             }
         }
         return false;
     }
+
     public Resource downloadPdfByCaseNumber(String caseNumber) throws IOException {
         log.info("Processing PDF download request for case: {}", caseNumber);
 
@@ -365,7 +425,7 @@ public class PdfService implements IPdfService {
                 filename = "documentation.pdf";
             } else if (caseNum == 2) {
                 filename = "documentation.pdf";
-            } else if(caseNum == 3){
+            } else if (caseNum == 3) {
                 filename = "documentation.pdf";
             }
         } else {
@@ -388,7 +448,6 @@ public class PdfService implements IPdfService {
         return caseFileRepository.findByCaseEntityNumber(caseNumber);
     }
 
-
     public Resource downloadCaseFile(String number, Long fileId) throws IOException {
         Case caseEntity = caseRepository.getCaseByNumber(number)
                 .orElseThrow(() -> new IllegalArgumentException("Case not found with ID: " + number));
@@ -407,5 +466,61 @@ public class PdfService implements IPdfService {
         }
 
         return new UrlResource(filePath.toUri());
+    }
+
+    public Resource downloadWordByCaseNumber(String caseNumber) throws IOException {
+        log.info("Processing Word document download request for case: {}", caseNumber);
+
+        Case caseEntity = caseRepository.getCaseByNumber(caseNumber)
+                .orElseThrow(() -> {
+                    log.warn("Case not found for Word download: {}", caseNumber);
+                    return new IllegalArgumentException("Case not found with number: " + caseNumber);
+                });
+
+        log.info("Case found for Word download: ID={}, Number={}", caseEntity.getId(), caseEntity.getNumber());
+
+        String filename = determineWordFilename(caseNumber);
+        log.debug("Determined Word filename for download: {} -> {}", caseNumber, filename);
+
+        Path filePath = Paths.get(filename);
+        log.debug("Looking for Word file at path: {}", filePath);
+
+        if (!Files.exists(filePath)) {
+            log.warn("Word file not found on disk: case={}, expectedPath={}", caseNumber, filePath);
+            throw new IllegalArgumentException("Word document not found for case: " + caseNumber);
+        }
+
+        long fileSize = Files.size(filePath);
+        log.info("Word file found for download: case={}, file={}, size={} bytes",
+                caseNumber, filename, fileSize);
+
+        Resource resource = new UrlResource(filePath.toUri());
+        log.debug("Created Word resource for download: {}", resource.getDescription());
+
+        return resource;
+    }
+
+    private String determineWordFilename(String caseNumber) {
+        String numericPart = caseNumber.replaceAll("[^0-9]", "");
+        String filename = null;
+
+        if (!numericPart.isEmpty()) {
+            int caseNum = Integer.parseInt(numericPart);
+            if (caseNum == 1) {
+                filename = "documentation.docx";
+            } else if (caseNum == 2) {
+                filename = "documentation.docx";
+            } else if (caseNum == 3) {
+                filename = "documentation.docx";
+            } else {
+                filename = "case_" + caseNumber + "_document.docx";
+            }
+        } else {
+            filename = "case_" + caseNumber + "_document.docx";
+        }
+
+        log.debug("Word filename determination: caseNumber={}, numericPart={}, result={}",
+                caseNumber, numericPart, filename);
+        return filename;
     }
 }

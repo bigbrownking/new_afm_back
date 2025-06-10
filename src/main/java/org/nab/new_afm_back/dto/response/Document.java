@@ -12,18 +12,21 @@ import java.util.List;
 public class Document {
     private String header;
     private List<Predicate> predicates;
+    private List<Risk> risks;
 
     public Document() {
         this.predicates = new ArrayList<>();
+        this.risks = new ArrayList<>();
     }
-    public void setPredicate(String label, String text){
-        predicates.add(new Predicate(label, text));
+    public void setPredicate(String label, String subLabel, String text){
+        predicates.add(new Predicate(label, subLabel, text));
+    }
+    public void setRisk(String label, String subLabel, String text){
+        risks.add(new Risk(label, subLabel, text));
     }
 }
 
-@Getter
-@AllArgsConstructor
-class Predicate{
-    private String label;
-    private String text;
-}
+
+
+
+

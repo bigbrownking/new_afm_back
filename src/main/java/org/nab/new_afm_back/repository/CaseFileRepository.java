@@ -32,4 +32,6 @@ public interface CaseFileRepository extends JpaRepository<CaseFile, Long> {
 
     void deleteByFileNameAndCaseEntityNumber(String fileName, String caseNumber);
     void deleteByIdAndCaseEntityNumber(Long id, String caseEntity_number);
+    boolean existsByFileName(String caseNumber);
+
 }

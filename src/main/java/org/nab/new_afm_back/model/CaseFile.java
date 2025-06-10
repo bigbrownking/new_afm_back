@@ -1,4 +1,5 @@
 package org.nab.new_afm_back.model;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
@@ -33,6 +34,7 @@ public class CaseFile {
     private String fileType;
 
     @Column(name = "uploaded_at", nullable = false)
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime uploadedAt;
 
     @Column(name = "uploaded_by")

@@ -20,6 +20,6 @@ public interface CaseRepository extends JpaRepository<Case, Long> {
     @Query("SELECT c FROM Case c WHERE c.uploadDate >= :startDate ORDER BY c.uploadDate DESC")
     Page<Case> findRecentCases(@Param("startDate") LocalDate startDate, Pageable pageable);
 
-    List<Case> findAllByNumberIn(Set<String> numbers);
+    List<Case> findAllByNumberIn(List<String> numbers);
 
 }

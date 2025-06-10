@@ -8,24 +8,21 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.java.Log;
 import lombok.extern.slf4j.Slf4j;
 import org.nab.new_afm_back.model.Case;
 import org.nab.new_afm_back.model.CaseFile;
 import org.nab.new_afm_back.service.impl.CaseFileService;
 import org.nab.new_afm_back.service.impl.CaseService;
-import org.nab.new_afm_back.service.impl.PdfService;
+import org.nab.new_afm_back.service.impl.FileService;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.util.List;
 
 @Slf4j
 @RestController
@@ -34,7 +31,7 @@ import java.util.List;
 @Tag(name = "Case Management", description = "APIs for managing legal cases")
 public class CaseController {
     private final CaseService caseService;
-    private final PdfService pdfService;
+    private final FileService fileService;
     private final CaseFileService caseFileService;
 
     @Operation(
@@ -120,7 +117,7 @@ public class CaseController {
         log.info("Downloading file ID " + fileId +  "from case ID " +  number);
 
         try {
-            Resource fileResource = pdfService.downloadCaseFile(number, fileId);
+            Resource fileResource = fileService.downloadCaseFile(number, fileId);
 
             if (fileResource == null || !fileResource.exists()) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body("File not found.");

@@ -1,5 +1,6 @@
 package org.nab.new_afm_back.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -24,17 +25,22 @@ public class Case {
     private String number;
 
     @Column(name = "uploadDate")
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate uploadDate;
 
     @Column(name = "updateDate")
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate updateDate;
 
+    @JsonFormat(pattern = "yyyy-MM-dd")
     @Column(name = "qualificationDate")
     private LocalDate qualificationDate;
 
+    @JsonFormat(pattern = "yyyy-MM-dd")
     @Column(name = "accusationDate")
     private LocalDate accusationDate;
 
+    @JsonFormat(pattern = "yyyy-MM-dd")
     @Column(name = "registrationDate")
     private LocalDate registrationDate;
 
@@ -64,17 +70,15 @@ public class Case {
     @Column(name = "criminal_income_amount", precision = 19, scale = 2)
     private BigDecimal criminalIncomeAmount;
 
-    @ElementCollection
-    @CollectionTable(name = "case_additional_files1", joinColumns = @JoinColumn(name = "case_id"))
-    @Column(name = "file_name")
-    private List<String> adds;
-
     @OneToMany(mappedBy = "caseEntity", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<CaseFile> caseFiles;
 
     @Column(name = "created_at")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 
+
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 

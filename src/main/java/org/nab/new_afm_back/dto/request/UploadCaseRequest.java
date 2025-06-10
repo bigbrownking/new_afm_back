@@ -29,4 +29,6 @@ public class UploadCaseRequest {
 
     @Schema(description = "Object or subject of the case", example = "Theft investigation")
     private String object;
+
+    private List<String> categories;
 }
